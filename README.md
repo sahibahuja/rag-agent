@@ -1,12 +1,12 @@
 🤖 BGE-M3 Agentic RAG
-A local Retrieval-Augmented Generation pipeline. Ingest PDFs into a vector store and chat with them using local AI models via Ollama.
+A local Retrieval-Augmented Generation pipeline. Ingest PDFs into a Qdrant vector store and chat with them using local AI models via Ollama.
 
 🛠 Tech Stack
 API: FastAPI
 
-Vector DB: Qdrant (with FastEmbed)
+Vector DB: Qdrant (Running in Docker)
 
-Embeddings: BGE-Small/Large
+Embeddings: BGE-Small/Large (FastEmbed)
 
 LLM: Ollama (Llama 3.2 3B)
 
@@ -17,13 +17,19 @@ PDF Logic: PyMuPDF (fitz)
 1. Prerequisites
    Python 3.10+
 
-Ollama installed and running.
+Ollama (installed and running).
 
-Pull the Model:
+Docker Desktop (installed and running).
 
-Bash
-ollama pull llama3.2 2. Install Dependencies
-Bash
+2. Infrastructure (Qdrant Docker)
+   Run the following command in your terminal to start the vector database:
+
+DOS
+docker run -d -p 6333:6333 -p 6334:6334 --name qdrant_service -v "%cd%/qdrant_storage:/qdrant/storage" qdrant/qdrant
+Dashboard: Access the UI at http://localhost:6333/dashboard
+
+3. Install Dependencies
+   Bash
 
 # Setup virtual environment
 
@@ -32,11 +38,9 @@ source venv/bin/activate # Windows: venv\Scripts\activate
 
 # Install requirements
 
-pip install fastapi uvicorn qdrant-client pymupdf ollama python-dotenv 3. Environment Config (.env)
-Create a .env file in the root directory:
-
+pip install fastapi uvicorn qdrant-client pymupdf ollama python-dotenv 4. Environment Config (.env)
 Ini, TOML
-QDRANT_HOST=./qdrant_db
+QDRANT_HOST=localhost
 QDRANT_PORT=6333
 COLLECTION_NAME=agent_knowledge
 
@@ -52,21 +56,19 @@ Run from the root folder:
 
 Bash
 python -m app.main
-API: http://localhost:8000
-
 Docs (Swagger): http://localhost:8000/docs
 
 📡 API Endpoints
 🟢 Ingest PDF (POST /v1/ingest/pdf)
 JSON
 {
-"file_path": "C:/path/to/your/document.pdf",
+"file_path": "C:/path/to/document.pdf",
 "metadata": { "category": "manual" }
 }
 🔵 Agent Chat (POST /v1/agent/chat)
 JSON
 {
-"question": "What does the document say about X?",
+"question": "Summarize this document.",
 "history": []
 }
 📂 Project Structure
@@ -75,8 +77,9 @@ rag-agent/
 ├── app/
 │ ├── main.py # FastAPI routes & Lifespan
 │ ├── engine.py # RAG & LLM Logic
-│ ├── database.py # Qdrant client & Init
+│ ├── database.py # Qdrant client (via Docker)
 │ ├── schemas.py # Pydantic models
 │ └── **init**.py # Package marker
-├── qdrant_db/ # Local vector storage
-└── .env # App configuration
+├── qdrant_storage/ # Persistent Docker volume data
+├── .env # App configuration
+└── README.md # This file
