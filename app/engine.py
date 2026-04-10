@@ -52,26 +52,47 @@ def rewrite_query(user_question: str, history: list):
 async def get_chat_response(question: str, history: list):
     q_client = get_client()
     
+    # 1. Transformation
     search_query = rewrite_query(question, history)
 
+    # 2. First Attempt Retrieval
     results = q_client.query(
         collection_name=COLLECTION_NAME,
         query_text=search_query,
         limit=5 
     )
     
-    context_blocks = []
-    sources = set() 
+    context = "\n".join([r.document for r in results])
+
+    # --- NEW: PHASE 2 - THE EVALUATOR ---
+    grade_prompt = f"""
+    You are a grader evaluating the relevance of retrieved documents to a user question.
     
-    for r in results:
-        # Extract the source from metadata
-        source_name = r.metadata.get("source", "file_path")
-        sources.add(source_name)
-        
-        block = f"[Source: {source_name}]\nContent: {r.document}"
-        context_blocks.append(block)
+    User Question: {question}
+    Retrieved Context: {context}
     
-    context = "\n\n---\n\n".join(context_blocks)
+    Does the context contain enough information to answer the question? 
+    Respond with exactly one word: 'YES' or 'NO'.
+    """
+    
+    grade_response = ollama.chat(
+        model=os.getenv("CHAT_MODEL"),
+        messages=[{'role': 'user', 'content': grade_prompt}]
+    )
+    grade = grade_response['message']['content'].strip().upper()
+
+    # If the grade is NO, we try a BROADER search once more
+    if "NO" in grade:
+        print("⚠️ Context was poor. Attempting a broader search...")
+        results = q_client.query(
+            collection_name=COLLECTION_NAME,
+            query_text=question, # Try the raw question instead of the rewritten one
+            limit=10 # Double the context to catch missing data
+        )
+        context = "\n".join([r.document for r in results])
+
+    # --- PHASE 3: FINAL ANSWERING ---
+    sources = list(set([r.metadata.get("source", "Unknown") for r in results]))
     
     system_prompt = "You are a professional Agentic RAG assistant. Use the context to answer. Always cite sources."
     full_prompt = f"Context:\n{context}\n\nQuestion: {question}"
@@ -84,8 +105,7 @@ async def get_chat_response(question: str, history: list):
         ]
     )
     
-    # RETURN BOTH: The answer and the list of unique sources
     return {
         "answer": response['message']['content'],
-        "sources": list(sources)
+        "sources": sources
     }
