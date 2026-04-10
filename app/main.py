@@ -43,7 +43,7 @@ async def ingest_pdf(payload: StorePayload):
 async def chat(payload: ChatPayload):
     """Context-aware chat using the logic in engine.py"""
     try:
-        response = get_chat_response(payload.question, payload.history)
+        response = await get_chat_response(payload.question, payload.history)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
