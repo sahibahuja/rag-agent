@@ -1,22 +1,65 @@
 import os
 import fitz
 import ollama
+from unstructured.partition.auto import partition
+from docling.document_converter import DocumentConverter
 from app.database import get_client, COLLECTION_NAME
-
-def process_pdf(file_path: str, metadata: dict):
-    """Extracts text, chunks it, and stores it in Qdrant"""
-    doc = fitz.open(file_path)
-    text = chr(12).join([page.get_text() for page in doc])
+# def process_file(file_path: str, metadata: dict):
+#     """Extracts text, chunks it, and stores it in Qdrant"""
+#     doc = fitz.open(file_path)
+#     text = chr(12).join([page.get_text() for page in doc])
     
-    # Chunking logic (1000 chars with 200 char overlap)
-    chunks = [text[i:i+1000] for i in range(0, len(text), 800)]
+#     # Chunking logic (1000 chars with 200 char overlap)
+#     chunks = [text[i:i+1000] for i in range(0, len(text), 800)]
+#     q_client = get_client()
+#     q_client.add(
+#         collection_name=COLLECTION_NAME,
+#         documents=chunks,
+#         metadata=[{"source": file_path, **metadata}] * len(chunks)
+#     )
+#     return len(chunks)
+
+
+# def process_file(file_path: str, metadata: dict):
+#     """
+#     Handles PDF, DOCX, XLSX, PPTX, and TXT.
+#     Automatically detects structure and tables.
+#     """
+#     # 1. Partition the file into elements
+#     elements = partition(filename=file_path, strategy="hi_res")
+    
+#     # 2. Join elements into a structured string (preserves tables/lists)
+#     text_content = "\n\n".join([str(el) for el in elements])
+    
+#     # 3. Chunking (1500 chars to account for complex tables/Excel rows)
+#     chunks = [text_content[i:i+1500] for i in range(0, len(text_content), 1200)]
+    
+#     q_client = get_client()
+#     q_client.add(
+#         collection_name=COLLECTION_NAME,
+#         documents=chunks,
+#         metadata=[{"source": os.path.basename(file_path), **metadata}] * len(chunks)
+#     )
+#     return len(chunks)
+
+def process_file(file_path: str, metadata: dict):
+    converter = DocumentConverter()
+    result = converter.convert(file_path)
+    # This automatically handles tables and layout better than anything else locally
+    text = result.document.export_to_markdown()
+
+    
+    # 3. Chunking (1500 chars to account for complex tables/Excel rows)
+    chunks = [text[i:i+1500] for i in range(0, len(text), 1200)]
+    
     q_client = get_client()
     q_client.add(
         collection_name=COLLECTION_NAME,
         documents=chunks,
-        metadata=[{"source": file_path, **metadata}] * len(chunks)
+        metadata=[{"source": os.path.basename(file_path), **metadata}] * len(chunks)
     )
     return len(chunks)
+
 
 def rewrite_query(user_question: str, history: list):
     """Refines the user question based on chat history to improve retrieval"""
@@ -49,20 +92,53 @@ def rewrite_query(user_question: str, history: list):
     # Clean output to remove any conversational filler from the LLM
     return response['message']['content'].strip().replace('"', '')
 
-async def get_chat_response(question: str, history: list):
-    q_client = get_client()
-    
-    # 1. Transformation
-    search_query = rewrite_query(question, history)
+def generate_multi_queries(question: str):
+    """Generates 3 different versions of the query to capture more context."""
+    prompt = f"""
+    You are an AI language model assistant. Your task is to generate three 
+    different versions of the given user question to retrieve relevant documents 
+    from a vector database. By generating multiple perspectives on the user query, 
+    your goal is to help the user overcome some of the limitations of 
+    distance-based similarity search.
 
-    # 2. First Attempt Retrieval
-    results = q_client.query(
-        collection_name=COLLECTION_NAME,
-        query_text=search_query,
-        limit=5 
-    )
+    Original question: {question}
+
+    Output (3 lines only):"""
     
-    context = "\n".join([r.document for r in results])
+    response = ollama.chat(
+        model=os.getenv("CHAT_MODEL"),
+        messages=[{'role': 'user', 'content': prompt}]
+    )
+    # Split the response into a list of 3 queries
+    queries = response['message']['content'].strip().split("\n")
+    return [q.strip() for q in queries if q.strip()][:3]
+
+async def get_chat_response(question: str, history: list):
+   # --- PHASE 1: QUERY EXPANSION ---
+    # Instead of one query, we now have three!
+    optimized_query = rewrite_query(question, history)
+    multi_queries = generate_multi_queries(optimized_query)
+    multi_queries.append(optimized_query) # Add the original too
+    
+    print(f"🚀 Multi-Query Plan: {multi_queries}")
+    q_client = get_client()
+    # --- PHASE 2: PARALLEL RETRIEVAL ---
+    all_results = []
+    for q in multi_queries:
+        res = q_client.query(
+            collection_name=COLLECTION_NAME,
+            query_text=q,
+            limit=3 # Smaller limit per query, but more queries total
+        )
+        all_results.extend(res)
+    
+    # Remove duplicate chunks (if different queries found the same thing)
+    unique_chunks = {}
+    for r in all_results:
+        unique_chunks[r.document] = r
+    
+    results = list(unique_chunks.values())
+    context = "\n\n".join([f"[Source: {r.metadata.get('source')}]\n{r.document}" for r in results])
 
     # --- NEW: PHASE 2 - THE EVALUATOR ---
     grade_prompt = f"""

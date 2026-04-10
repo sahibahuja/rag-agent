@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from app.schemas import StorePayload, ChatPayload
 from app.database import init_db
-from app.engine import process_pdf, get_chat_response
+from app.engine import process_file, get_chat_response
 
 # 1. Define the Lifespan logic (Startup and Shutdown)
 @asynccontextmanager
@@ -28,13 +28,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-@app.post("/v1/ingest/pdf")
-async def ingest_pdf(payload: StorePayload):
-    """Extracts PDF text and indexes it using the logic in engine.py"""
+@app.post("/v1/ingest/file")
+async def ingest_file(payload: StorePayload):
+    """Extracts file text and indexes it using the logic in engine.py"""
     if not os.path.exists(payload.file_path):
-        raise HTTPException(status_code=404, detail="PDF not found")
+        raise HTTPException(status_code=404, detail="File not found")
     try:
-        count = process_pdf(payload.file_path, payload.metadata)
+        count = process_file(payload.file_path, payload.metadata)
         return {"message": f"Successfully indexed {count} chunks."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

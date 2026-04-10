@@ -1,85 +1,29 @@
-🤖 BGE-M3 Agentic RAG
-A local Retrieval-Augmented Generation pipeline. Ingest PDFs into a Qdrant vector store and chat with them using local AI models via Ollama.
-
-🛠 Tech Stack
-API: FastAPI
-
-Vector DB: Qdrant (Running in Docker)
-
-Embeddings: BGE-Small/Large (FastEmbed)
-
-LLM: Ollama (Llama 3.2 3B)
-
-PDF Logic: PyMuPDF (fitz)
-
-🚀 Initial Setup
-
-1. Prerequisites
-   Python 3.10+
-
-Ollama (installed and running).
-
-Docker Desktop (installed and running).
-
-2. Infrastructure (Qdrant Docker)
-   Run the following command in your terminal to start the vector database:
-
-DOS
-docker run -d -p 6333:6333 -p 6334:6334 --name qdrant_service -v "%cd%/qdrant_storage:/qdrant/storage" qdrant/qdrant
-Dashboard: Access the UI at http://localhost:6333/dashboard
-
-3. Install Dependencies
-   Bash
-
-# Setup virtual environment
-
-python -m venv venv
-source venv/bin/activate # Windows: venv\Scripts\activate
-
-# Install requirements
-
-pip install fastapi uvicorn qdrant-client pymupdf ollama python-dotenv 4. Environment Config (.env)
-Ini, TOML
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-COLLECTION_NAME=agent_knowledge
-
-EMBED_MODEL=BAAI/bge-small-en-v1.5
-EMBED_MODEL_NAME=fast-bge-small-en-v1.5
-CHAT_MODEL=llama3.2:3b
-CONTEXT_WINDOW=4096
-
-API_HOST=0.0.0.0
-API_PORT=8000
-🏃 How to Run
-Run from the root folder:
-
-Bash
-python -m app.main
-Docs (Swagger): http://localhost:8000/docs
-
-📡 API Endpoints
-🟢 Ingest PDF (POST /v1/ingest/pdf)
-JSON
-{
-"file_path": "C:/path/to/document.pdf",
-"metadata": { "category": "manual" }
+🤖 BGE-M3 Agentic RAGA high-performance, local Agentic Retrieval-Augmented Generation pipeline. This system transforms a standard "Chat with PDF" tool into a reasoning engine that handles history, evaluates context, and supports complex document layouts.🛠 Tech StackAPI Framework: FastAPIVector Database: Qdrant (Dockerized)Ingestion Engine: Docling (Default) / PyMuPDF / UnstructuredEmbeddings: BGE-Small/Large (FastEmbed)LLM Engine: Ollama (Llama 3.2 3B)🚀 Initial Setup1. PrerequisitesPython 3.10+Ollama: Installed and running (ollama serve).Docker Desktop: Installed and running.2. Infrastructure (Qdrant Docker)Run this command to start the persistent vector store:DOSdocker run -d -p 6333:6333 -p 6334:6334 --name qdrant_service -v "%cd%/qdrant_storage:/qdrant/storage" qdrant/qdrant 3. Install Core DependenciesBashpip install fastapi uvicorn qdrant-client ollama python-dotenv docling pymupdf
+📡 API Endpoints🟢 Ingest File (POST /v1/ingest/file)Supported: PDF, Docx, PPTX.JSON{
+"file_path": "C:/Users/name/docs/report.pdf",
+"metadata": { "project": "AI-Initiative" }
 }
-🔵 Agent Chat (POST /v1/agent/chat)
-JSON
-{
-"question": "Summarize this document.",
+🔵 Agentic Chat (POST /v1/agent/chat)Logic: Rewrite -> Multi-Query -> Grade -> Answer.JSON{
+"question": "What is the budget for Phase 2?",
 "history": []
 }
-📂 Project Structure
-Plaintext
-rag-agent/
+📂 Project StructurePlaintextrag-agent/
 ├── app/
-│ ├── main.py # FastAPI routes & Lifespan
-│ ├── engine.py # RAG & LLM Logic
-│ ├── database.py # Qdrant client (via Docker)
+│ ├── main.py # FastAPI routes
+│ ├── engine.py # Reasoning & Docling Logic
+│ ├── database.py # Qdrant client
 │ ├── schemas.py # Pydantic models
-│ └── **init**.py # Package marker
-├── qdrant_storage/ # Persistent Docker volume data
-├── .env # App configuration
+├── qdrant_storage/ # Persistent Docker data
+├── .env # Configuration
 └── README.md # This file
+📊 How Tables are Handled (Markdown Structure)When you ingest a document with a table, Docling converts it into the following structure. This is what is stored in Qdrant and sent to the LLM:Example Extracted Context:Markdown# Project Financials
+The following table outlines the resource allocation for 2026:
+
+| Phase | Resource Name | Allocation | Budget (INR) |
+| :---- | :------------ | :--------- | :----------- |
+| P1    | Sahib Ahuja   | 100%       | 5,00,000     |
+| P2    | AI Agent      | 50%        | 2,50,000     |
+| P3    | Qdrant DB     | 25%        | 1,25,000     |
+
+**Notes:** Budget includes Docker infrastructure costs.
+🔄 Ingestion Reference TableToggle these methods in engine.py based on your document complexity.MethodBest For...Install CommandDocling (Active)Tables & Complex PDFspip install doclingPyMuPDF (Speed)Fast, Digital-only PDFspip install pymupdfUnstructuredMulti-Format (.xlsx, .ppt)pip install "unstructured[all-docs,local-inference]"🟠 Special Note for Unstructured + OCRIf using Unstructured for scanned documents, you must install Tesseract OCR:Download from UB Mannheim.Add C:\Program Files\Tesseract-OCR to your Windows System PATH.🧠 Agentic Logic FlowQuery Transformation: Turns "What about him?" into "What is Sahib's role?".Multi-Querying: Searches for 3 variations of the query simultaneously.Context Grading: Re-searches if the first 5 chunks are irrelevant.Citations: Returns a unique list of filenames used for the answer.
