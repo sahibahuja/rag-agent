@@ -3,7 +3,7 @@ import fitz
 import ollama
 import tempfile
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
 from app.database import get_client, COLLECTION_NAME
 # def process_file(file_path: str, metadata: dict):
@@ -49,14 +49,25 @@ def process_file(file_path: str, metadata: dict):
     file_ext = os.path.splitext(file_path)[1].lower()
     full_markdown = ""
     
-    # 1. Standard Docling Config
+    # 1. Setup Resource Limits (The Thread Fix)
+    # 2.8x uses AcceleratorOptions for CPU/GPU thread management
+    acc_options = AcceleratorOptions(num_threads=1) # Prevents memory spikes
+    
+    # 2. Setup PDF Logic (The OCR Fix)
     pipeline_options = PdfPipelineOptions()
-    pipeline_options.do_ocr = False 
+    pipeline_options.accelerator_options = acc_options
+    pipeline_options.do_ocr = True # Enable to read text in images
     pipeline_options.do_table_structure = True
     
+    # Correct field name in 2.8x is force_full_page_ocr
+    pipeline_options.ocr_options.force_full_page_ocr = False 
+    
+    # 3. Define Format Options
     format_options = {
         InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
     }
+    
+    # 4. Initialize Converter
     converter = DocumentConverter(format_options=format_options)
 
     if file_ext == ".pdf":
@@ -68,8 +79,7 @@ def process_file(file_path: str, metadata: dict):
             start_page = i
             end_page = min(i + chunk_size, total_pages)
             
-            # 2. Use tempfile for thread-safety
-            # This creates a unique file that won't collide with other API calls
+            # Thread-safe temp file creation
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 temp_pdf_path = tmp.name
                 
@@ -79,19 +89,19 @@ def process_file(file_path: str, metadata: dict):
                 temp_doc.save(temp_pdf_path)
                 temp_doc.close()
 
-                # Process the chunk
+                # Process the 10-page chunk
                 result = converter.convert(temp_pdf_path)
                 full_markdown += result.document.export_to_markdown() + "\n\n"
             finally:
-                # Cleanup the unique temp file
                 if os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
         doc.close()
     else:
+        # For non-PDFs, Docling auto-detects formats
         result = converter.convert(file_path)
         full_markdown = result.document.export_to_markdown()
 
-    # 3. Final Ingestion to Qdrant
+    # 5. Final Ingestion to Qdrant
     chunks = [full_markdown[i:i+1500] for i in range(0, len(full_markdown), 1200)]
     
     q_client = get_client()
@@ -105,7 +115,6 @@ def process_file(file_path: str, metadata: dict):
     )
     
     return len(chunks)
-
 def rewrite_query(user_question: str, history: list):
     """Refines the user question based on chat history to improve retrieval"""
     if not history:
